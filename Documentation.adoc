@@ -1,0 +1,595 @@
+// :source-highlighter: pygments
+
+:source-highlighter: coderay
+:coderay-linenums-mode: inline
+:coderay-css: class
+:table-caption: Data Set
+:icons: font
+:numbered:
+// :title-page:
+//include::files.adoc[]
+
+
+// = Documentation Librairie FAT32: Projet de Diplôme 2021
+// :toc: macro
+// :author: ---
+// :revdate: 22 Mai 2021
+// :revnumber: 1.0
+
+// <<<
+
+// toc::[]
+// :toc-title: Table des matières
+
+// <<<
+
+== Introduction
+
+Cette librairie permet de lire des fichiers présents sur un volume (testé avec carte micro SD).
+
+
+
+== Abstraction
+
+Afin de fonctionner correctement, la librairie se base sur deux fonctions permettant de lire un secteur, ou d'écrire dans un secteur.
+
+
+
+
+.Header de la fonction
+[source,C,linenums]
+----
+bit SD_ReadBlock(unsigned char token, unsigned char *buf, unsigned int nbBytes, unsigned long sectorAddr)
+
+bit SD_WriteBlock(unsigned char token, unsigned char *buf, unsigned int nbBytes, unsigned long blkAddr);
+----
+
+//[horizontal]
+token:: Valeur à envoyer avant une opération de lecture.
+buf:: Tableau pour stocker les valeurs lues.
+nbBytes:: Le nombre de bytes à lire (nombre de bytes dans un secteur).
++
+NOTE: Avant que le Boot Sector ne soit lu, la taille d'un secteur est définie dans le fichier fat32.h
+
+sectorAddr:: Adresse du secteur à lire
+return:: Retourne 1 si la lecture à réussi, autrement 0
+
+<<<
+
+== Structure de données
+
+La librairie contient 3 structure :
+
+[[bookmark-BootSector]]BootSector:: Contient les informations nécessaires pour le fonctionnement de base du FAT32
++
+[%header, cols="1,^1,3", stripes=even]
+|===
+|Nom 			|Taile (byte) 	|Description
+|BytsPerSec		| 2 			| Le nombre de byte par secteur
+|SecPerClus		| 1 			| Le nombre de secteur par cluster
+|RsvdSecCnt		| 2 			| Le nombre de secteur dans la région réservée
+|NumFATs		| 1 			| Le nombre de Table FAT
+|FATSz32		| 4 			| La taille d'une Table FAT
+|RootClus		| 4 			| Le numéro de cluster de la racine
+|RootDirSector	| 2 			| Le premier secteur de la racine (pas réellement dans le Boot Sector)
+|===
+
+[[bookmark-FileEntry]]FileEntry:: Contient les informations minimum pour trouver et lire un fichier (plus peuvent être rejoutée si besoin)
++
+[%header, cols="1,^1,3", stripes=even]
+|===
+|Nom 			|Taile (byte) 	|Description
+|Name			| 11 			| Nom du fichier (8 Bytes de nom + 3 Bytes d'extension)
+|FstClustHi		| 2 			| MSBytes du numéro de cluster
+|FstClustLO		| 2 			| LSBytes du numéro de cluster
+|fileSize		| 4 			| Taille du fichier
+|===
+
+<<<
+
+[[bookmark-FileInfo]]FileInfo:: Sert de curseur au fichier ouvert. Il permet de savoir ou nous en sommes dans la lecture. Il peut également être déplacé manuellement.
++
+[%header, cols="1,^1,3", stripes=even]
+|===
+|Nom 			|Taile (byte) 	|Description
+|baseCluster	| 4 			| Numéro du cluster de depart
+|currentCluster	| 4 			| Numéro du cluster actuel
+|Offset			| 4 			| Offset en byte depuis le début du fichier
+|fileSize		| 4 			| Taille du fichier
+|currentSector	| 2 			| Numéro du secteur actuel dans le cluster
+|===
+
+
+<<<
+
+
+== Fonctions
+
+=== Endianness
+****
+// SwapEndian
+[source,C,linenums]
+----
+void SwapEndianINT(unsigned int *val);
+void SwapEndianLONG(unsigned long *val);
+----
+
+Ces deux fonctions permettent de changer l'endianness d'une valeur. Elles sont nécessaires car les valeurs sur la carte SD sont en *Little Endian* alors que le microcontrôleur traite les valeurs en tant que *Big Endian*. La valeur passé en entrée sera directement changée.
+
+
+.Paramètres
+[horizontal]
+val:: 	Adresse de la valeur à convertir
+
+[discrete]
+==== Exemple
+[source,C,linenums]
+.Conversion d'endianness pour une variable de type INT
+----
+unsigned int a = 0x0002;
+SwapEndianINT(&a);
+// a == 0x0200 = 512
+----
+
+****
+
+
+<<<
+
+// Parsing
+=== ParseBootSector
+****
+Cette fonction permet de lire les informations utiles du Boot Sector et de les stocker dans une structure de type BootSector.
+
+[source,C,linenums]
+----
+BootSector ParseBootSector(unsigned char *buf);
+----
+.Paramètres
+[horizontal]
+buf:: 		tableau de 512 bytes pour stocker les valeurs lues
+return:: 	Structure <<BootSector>> qui contient les informations lues
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+.Utilisation de la fonction ParseBootSector
+----
+unsigned char buffer[512];
+BootSector bs;
+
+bs = ParseBootSector(buffer);
+----
+
+****
+
+
+<<<
+
+=== ReadFileEntry
+****
+ReadFileEntry permet de lire une entrée de fichier et de stocker les informations lues dans une structure de type FileEntry. Elle est utilisée dans la fonction <<OpenFile>> .
+
+[source,C,linenums]
+----
+FileEntry ReadFileEntry(unsigned char *buf, unsigned int offset);
+----
+.Paramètres
+[horizontal]
+buf:: 		tableau de 512 bytes pour stocker les valeurs lues
+offset::	Position de l'entrée de fichier dans le secteur (doit être un multiple de 32)
+return:: 	Structure <<FileEntry>> qui contient les informations lues
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+.Utilisation de la fonction ReadFileEntry
+----
+unsigned char buffer[512];
+FileEntry fe;
+
+// buffer doit contenir le secteur ou se trouve
+// l'entrée du fichier
+
+fe = ReadFileEntry(buffer, 160);
+----
+****
+
+
+
+<<<
+
+=== CleanFilename
+****
+Cette fonction permet de transformer le nom du fichier lu sur la carte qui possède un format avec une taille fixe (ex : *FILE____TXT*) à un format plus lisible (ex : *file.txt*). Cette conversion facilite la comparaison lors de la recherche de fichier sur le disque.
+
+[source,C,linenums]
+----
+unsigned char CleanFilename(char *filename);
+----
+.Paramètres
+[horizontal]
+filename:: 	Nom du fichier (qui peut être trouvé dans la structure <<bookmark-FileEntry>>)
+return:: 	La Taille du nom du fichier après conversion
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+// Exemple 1 
+CleanFilename(fs.Name);
+
+// Exemple 2
+CleanFilename("FILE    TXT");
+----
+****
+
+
+<<<
+
+=== GetNextClusterValue
+****
+Cette fonction permet de lire la table FAT et retourne la valeur du prochain Cluster
+
+[source,C,linenums]
+----
+unsigned long GetNextClusterValue(BootSector *bs, unsigned char *buf, unsigned long clusterNumber);
+----
+.Paramètres
+[horizontal]
+bs:: 			Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::			tableau de 512 bytes pour stocker les valeurs lues
+clusterNumber:: Numéro de cluster actuel
+return:: 		Numéro de cluster suivant
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+unsigned long clusterValue;
+
+clusterValue = GetNextClusterValue(&bs, buffer, 8);
+----
+
+****
+
+
+<<<
+
+
+=== SetNextClusterValue
+****
+Cette fonction permet de modifier les tables FAT afin de faire pointer le secteur actuel au prochain secteur, puis indiquer la fin du fichier avec le secteur suivant
+
+[source,C,linenums]
+----
+void SetNextClusterValue(BootSector *bs, unsigned char *buf, unsigned long clusterNumber, unsigned long nextClusterNumber);
+----
+.Paramètres
+[horizontal]
+bs:: 			Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::			tableau de 512 bytes pour stocker les valeurs lues
+clusterNumber:: Numéro de cluster actuel
+nextClusterNumber:: Numéro de cluster suivant
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+
+SetNextClusterValue(&bs, buffer, 8, 10);
+----
+
+****
+
+
+<<<
+
+
+=== GetSectorFromCluster
+****
+Calcule et retourne la valeur du premier secteur du numéro de cluster passé en paramètre
+
+[source,C,linenums]
+----
+unsigned long GetSectorFromCluster(BootSector *bs, unsigned long cluster);
+----
+.Paramètres
+[horizontal]
+bs:: 			Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+clusterNumber:: Numéro de cluster actuel
+return:: 		Adresse du premier secteur du cluster
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+unsigned long sector;
+
+sector = GetSectorFromCluster(&bs, 8);
+----
+
+****
+
+<<<
+
+=== FindFreeCluster
+****
+Cette fonction cherche dans la table FAT un cluster vide
+
+[source,C,linenums]
+----
+unsigned long FindFreeCluster(BootSector *bs, unsigned char *buf);
+----
+.Paramètres
+[horizontal]
+bs:: 			Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::			tableau de 512 bytes pour stocker les valeurs lues
+return:: 		Le numéro de cluster vide
+
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+cluster = FindFreeCluster(&bs, buf);
+----
+
+****
+
+
+<<<
+
+=== FindFileEntry
+****
+Cette fonction cherche dans le cluster du secteurDepart une entrée de fichier et retourne l'offset depuis le secteurDepart en byte
+
+[source,C,linenums]
+----
+unsigned int FindFileEntry(BootSector *bs, char *buf, unsigned long secteurDepart, char *filename);
+----
+.Paramètres
+[horizontal]
+bs:: 			Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::			tableau de 512 bytes pour stocker les valeurs lues
+secteurDepart:: Numéro de secteur ou commencer la recherche (doit être le premier secteur du cluster)
+filename:: 		Nom du fichier à chercher
+return:: 		Position (offset) en byte depuis le secteurDepart
+
+NOTE: Si l'entrée du fichier se trouve à l'offset 192 du deuxième secteur, la fonction retourne 512 + 192
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+unsigned long offset;
+
+offset = FindFileEntry(&bs, buffer, 8192, "file.txt");
+----
+
+****
+
+<<<
+
+=== ListFilesDirectory
+****
+Liste tous les fichiers présents dans un cluster
+
+[source,C,linenums]
+----
+void ListFilesDirectory(BootSector *bs, unsigned char *buf, unsigned char *texte, unsigned long secteurDepart);
+----
+.Paramètres
+[horizontal]
+bs:: 			Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::			tableau de 512 bytes pour stocker les valeurs lues
+texte:: 		Tableau ou seront stocké les noms de fichiers
+secteurDepart:: Numéro de secteur ou commencer la recherche (doit être le premier secteur du cluster)
+
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+ListFilesDirectory(&bs, buf, texte, 8192);
+----
+
+****
+
+
+<<<
+
+
+=== OpenFile
+****
+Cette fonction permet "d'ouvrir" un fichier. Elle retourne une structure qui contient la position du curseur dans le fichier.
+
+[source,C,linenums]
+----
+FileInfo OpenFile(BootSector *bs, unsigned char *buf, unsigned long secteurDepart, FileEntry *fe, char *filename);
+----
+.Paramètres
+[horizontal]
+bs:: 			Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::			tableau de 512 bytes pour stocker les valeurs lues
+secteurDepart:: Premier secteur du cluster dans lequel se trouve le fichier (Racine, Premier secteur d'un dossier, ...)
+fe:: 			Adresse de la structure (<<FileEntry>>) qui contiendra les informations de base sur le fichier
+return:: 		Structure <<FileInfo>> qui contient la position du curseur
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+FileInfo fi;
+
+fi = FileOpen(&bs, buffer, 8192, &fe, "file.txt");
+----
+
+****
+
+
+<<<
+
+=== ReadFile
+****
+Cette fonction permet de lire un nombre précis de byte dans un fichier depuis la position du  curseur
+
+[source,C,linenums]
+----
+unsigned int ReadFile(BootSector *bs, unsigned char *buf, unsigned char *output, FileInfo *fi, unsigned int length);
+----
+.Paramètres
+[horizontal]
+bs:: 		Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::		tableau de 512 bytes pour stocker les valeurs lues
+output:: 	Adresse d'un tableau ou écrire les valeur lues
+fi:: 		Structure <<FileInfo>> qui contient la position du curseur
+length:: 	Nombre de byte à lire
+return:: 	Nombre de bytes lu (retourne une valeur plus petite que length si la fin du fichier a été atteinte)
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+// Lis 25 bytes depuis la position du curseur
+FileRead(&bs, buffer, output, &fi, 25);
+----
+
+****
+
+
+<<<
+
+=== WriteFile
+****
+Cette fonction permet d'écrire un nombre précis de byte dans un fichier, en ajoutant le contenu à la fin du fichier (mode append)
+
+[source,C,linenums]
+----
+void WriteFile(BootSector *bs, unsigned char *buf, FileInfo *fi, FileEntry *fe, unsigned char *texte, unsigned int length);
+----
+.Paramètres
+[horizontal]
+bs:: 		Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::		tableau de 512 bytes pour stocker les valeurs lues
+fi:: 		Structure <<FileInfo>> qui contient la position du curseur
+fe:: 		Structure <<FileEntry>> qui contient l'entrée du fichier
+texte:: 	Buffer contenant les informations à écrire
+length:: 	Nombre de byte à écrire
+
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+// Lis 25 bytes depuis la position du curseur
+FileRead(&bs, buffer, output, &fi, 25);
+----
+
+****
+
+
+<<<
+
+
+=== FileSeek
+****
+Cette fonction permet de déplacer le curseur du fichier actuellement ouvert
+
+[source,C,linenums]
+----
+bit FileSeek(BootSector *bs, unsigned char *buf, FileInfo *fi, unsigned long offset, bit mode);
+----
+.Paramètres
+[horizontal]
+bs:: 		Adresse de la structure (<<BootSector>>) qui contient les informations du BootSector
+buf::		tableau de 512 bytes pour stocker les valeurs lues
+fi:: 		Structure <<FileInfo>> qui contient la position du curseur
+offset:: 	Nombre de byte à avancer
+mode:: 		Mode de déplacement
++
+[horizontal]
+SEEK_CUR::: Déplace le curseur depuis sa position
+SEEK_SET::: Déplace le curseur depuis le début du fichier
+return:: 	SUCCESS (1) ou FAILED (0)
+
+[discrete]
+==== Exemple
+
+[source,C,linenums]
+----
+// Avance le curseur de 500 bytes depuis le
+// début du fichier
+FileSeek(&bs, buffer, &fi, 500, SEEK_SET);
+
+// Avance le curseur de 500 bytes depuis la
+// position du curseur
+FileSeek(&bs, buffer, &fi, 500, SEEK_CUR);
+----
+
+****
+
+
+<<<
+
+== Exemples
+
+
+=== Ouverture et lecture d'un fichier
+[source,C,linenums]
+----
+BootSector bs;
+FileEntry fe;
+FileInfo fi;
+
+unsigned char buffer[512];
+
+// Parse le boot sector et ouvre le fichier
+bs = ParseBootSector(buffer);
+fi = OpenFile(&bs, buffer, bs.RootDirSector, &fe, "test.txt");
+
+// Lis le fichier puis affiche le contenu sur le LCD_DOG
+ReadFile(&bs, buffer, texte, &fi, 20);
+
+SelectPosCaractLiCo(2, 0);
+AfficherChaineAZT(texte);
+
+// Lis 20 nouveaux bytes qui seront également affichés sur le LCD_DOG
+ReadFile(&bs, buffer, texte, &fi, 20);
+
+SelectPosCaractLiCo(3, 0);
+AfficherChaineAZT(texte);
+----
+
+
+=== Ouverture et écriture dans un fichier
+[source,C,linenums]
+----
+BootSector bs;
+FileEntry fe;
+FileInfo fi;
+
+unsigned char buffer[512];
+unsigned char texte[15];
+unsigned char nbBytes = 0;
+
+// Parse le boot sector et ouvre le fichier
+bs = ParseBootSector(buffer);
+fi = OpenFile(&bs, buffer, bs.RootDirSector, &fe, "test.txt");
+
+nbBytes = sprintf(texte, "Hello World!");
+
+WriteFile(&bs, buffer, &fi, &fe, texte, nbBytes);
+----
