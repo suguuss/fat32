@@ -58,7 +58,7 @@ return:: Retourne 1 si la lecture à réussi, autrement 0
 
 == Structure de données
 
-La librairie contient 3 structure :
+La librairie contient 3 structures :
 
 [[bookmark-BootSector]]BootSector:: Contient les informations nécessaires pour le fonctionnement de base du FAT32
 +
@@ -114,7 +114,7 @@ void SwapEndianINT(unsigned int *val);
 void SwapEndianLONG(unsigned long *val);
 ----
 
-Ces deux fonctions permettent de changer l'endianness d'une valeur. Elles sont nécessaires car les valeurs sur la carte SD sont en *Little Endian* alors que le microcontrôleur traite les valeurs en tant que *Big Endian*. La valeur passé en entrée sera directement changée.
+Ces deux fonctions permettent de changer l'endianness d'une valeur. Elles sont nécessaires car les valeurs sur la carte SD sont en *Little Endian* alors que le microcontrôleur traite les valeurs en tant que *Big Endian*. La valeur passée en entrée sera directement changée.
 
 
 .Paramètres
@@ -442,7 +442,7 @@ fi = FileOpen(&bs, buffer, 8192, &fe, "file.txt");
 
 === ReadFile
 ****
-Cette fonction permet de lire un nombre précis de byte dans un fichier depuis la position du  curseur
+Cette fonction permet de lire un nombre précis de byte dans un fichier depuis la position du curseur
 
 [source,C,linenums]
 ----
@@ -455,7 +455,7 @@ buf::		tableau de 512 bytes pour stocker les valeurs lues
 output:: 	Adresse d'un tableau ou écrire les valeur lues
 fi:: 		Structure <<FileInfo>> qui contient la position du curseur
 length:: 	Nombre de byte à lire
-return:: 	Nombre de bytes lu (retourne une valeur plus petite que length si la fin du fichier a été atteinte)
+return:: 	Nombre de bytes lus (retourne une valeur plus petite que length si la fin du fichier a été atteinte)
 
 [discrete]
 ==== Exemple
