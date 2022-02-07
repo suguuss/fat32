@@ -1,6 +1,6 @@
 /*===========================================================================*=
-   CFPT - Projet : FAT32
-   Auteur        : Nicolas Albanesi
+   Projet        : FAT32
+   Auteur        : suguuss
    Date creation : 26.04.2021
   =============================================================================
    Descriptif: Librairie FAT32
